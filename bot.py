@@ -130,7 +130,7 @@ class WalletBot(object):
             self.chains = {}
             self.assets = {}
             
-            self.addRPC("https://rpc.raptorchain.io/web3", 0x52505452, "RPTR", "RaptorChain", self.RaptorChainPriceFeed())
+            self.addRPC("http://localhost:4242/web3", 0x52505452, "RPTR", "RaptorChain", self.RaptorChainPriceFeed())
             self.addRPC("https://bscrpc.com/", 56, "BNB", "BNB Chain", self.BSCPriceFeed())
             self.addRPC("https://polygon-rpc.com", 137, "MATIC", "Polygon")
             
