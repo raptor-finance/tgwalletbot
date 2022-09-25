@@ -177,6 +177,7 @@ class WalletBot(object):
         self.config = self.Config("botconfig.conf")
         self.updater = Updater(self.config.token, use_context=True)
 
+        self.warnHoldOn = False
         self.acctMgr = self.AccountManager(self.config.salt)
         self.assets = self.AssetsManager()
 
@@ -245,7 +246,8 @@ class WalletBot(object):
         update.message.reply_text(f"You own {_bal} {asset.symbol} (~{_usdValue}$)" if _usdValue else f"You own {_bal} {asset.symbol}")
 
     def balances(self, update: Update, context: CallbackContext):
-        update.message.reply_text("Hold on while I pull your balances from blockchain...")
+        if self.warnHoldOn:
+            update.message.reply_text("Hold on while I pull your balances from blockchain...")
         update.message.reply_text(self.assets.formatBalanceList(self.getAddress(update)))
 
     
