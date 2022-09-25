@@ -235,7 +235,7 @@ class WalletBot(object):
         update.message.reply_text(f"Your address : {addr}")
         
     def balance(self, update: Update, context: CallbackContext):
-        assetName = context.args[0]
+        assetName = context.args[0] if len(context.args) else "rptr"
         asset = self.assets.getAsset(assetName)
         if not asset:
             update.message.reply_text(f"Error: unknown asset {assetName}")
