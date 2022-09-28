@@ -48,22 +48,33 @@ class WalletBot(object):
             def tokenPrice(self, tokenAddr, decimals):
                 return float(0)
 
-        class DEX(object):
+        class DexRouter(object):
             def __init__(self, web3Instance, router, chainId):
                 self.web3 = web3Instance
                 self.router = web3Instance.eth.contract(address=w3.toChecksumAddress(router), abi=ROUTERABI)
                 self.WETH = web3Instance.eth.contract(address=self.router.functions.WETH().call(), abi=ERC20ABI)
+                self.chainId = chainId
+            
+            def calcSlippage(self, amountIn, _path):
+                _amounts = self.router.functions.getAmountsOut(int(amountIn), _path).call()
+                return int(_amounts[len(_amounts)-1] * 0.99)
             
             def swapETHForTokens(self, ETHAmount, destinationToken, _sender):
-                return self.router.functions.swapExactETHForTokens(0, [self.WETH.address, w3.toChecksumAddress(destinationToken)], _sender, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff).buildTransaction({'nonce': self.web3.eth.get_transaction_count(_sender),'chainId': self.chainId, 'gasPrice': self.web3.eth.gasPrice, 'from': _sender, 'value': ETHAmount})
+                _path = [self.WETH.address, w3.toChecksumAddress(destinationToken)]
+                _min = self.calcSlippage(ETHAmount, _path)
+                return self.router.functions.swapExactETHForTokens(_min, _path, _sender, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff).buildTransaction({'nonce': self.web3.eth.get_transaction_count(_sender),'chainId': self.chainId, 'gasPrice': self.web3.eth.gasPrice, 'from': _sender, 'value': ETHAmount})
 
             def swapTokensForTokens(self, tokenFrom, tokenTo, tokenAmount, _sender):
-                return self.router.functions.swapExactTokensForTokens(tokenAmount, 0, [w3.toChecksumAddress(tokenFrom), w3.toChecksumAddress(tokenTo)], _sender, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff).buildTransaction({'nonce': self.web3.eth.get_transaction_count(_sender),'chainId': self.chainId, 'gasPrice': self.web3.eth.gasPrice, 'from': _sender})
+                _path = [w3.toChecksumAddress(tokenFrom), self.WETH.address, w3.toChecksumAddress(tokenTo)]
+                _min = self.calcSlippage(tokenAmount, _path)
+                return self.router.functions.swapExactTokensForTokens(tokenAmount, _min, _path, _sender, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff).buildTransaction({'nonce': self.web3.eth.get_transaction_count(_sender),'chainId': self.chainId, 'gasPrice': self.web3.eth.gasPrice, 'from': _sender})
 
             def swapTokensForETH(self, tokenFrom, tokenAmount, _sender):
-                return self.router.functions.swapExactTokensForETH(tokenAmount, 0, [w3.toChecksumAddress(tokenFrom), self.WETH.address], _sender, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff).buildTransaction({'nonce': self.web3.eth.get_transaction_count(_sender),'chainId': self.chainId, 'gasPrice': self.web3.eth.gasPrice, 'from': _sender})
+                _path = [w3.toChecksumAddress(tokenFrom), self.WETH.address]
+                _min = self.calcSlippage(tokenAmount, _path)
+                return self.router.functions.swapExactTokensForETH(tokenAmount, _min, _path, _sender, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff).buildTransaction({'nonce': self.web3.eth.get_transaction_count(_sender),'chainId': self.chainId, 'gasPrice': self.web3.eth.gasPrice, 'from': _sender})
 
-            def swap(self, _sender, assetFrom, assetTo, rawAmount):
+            def swap(self, _sender, assetFrom, assetTo, rawAmount: int):
                 if ((assetFrom.isNative) and (not assetTo.isNative)):
                     return self.swapETHForTokens(rawAmount, assetTo.address, _sender)
                 if ((not assetFrom.isNative) and (assetTo.isNative)):
@@ -126,7 +137,7 @@ class WalletBot(object):
                 def allowance(self, owner, spender):
                     return self.contract.functions.allowance(owner, spender).call()
 
-            def __init__(self, provider, chainId, ticker, chainName, explorer, priceFeed, DEX):
+            def __init__(self, provider, chainId, ticker, chainName, explorer, priceFeed):
                 self.web3 = Web3(HTTPProvider(provider))
                 self.chainId = chainId
                 self.nativeToken = self.NativeAsset(self.web3, ticker, chainId, priceFeed)
@@ -134,7 +145,7 @@ class WalletBot(object):
                 self.name = chainName
                 self.priceFeed = priceFeed
                 self.explorer = explorer
-                self.DEX = DEX
+                self.DEX = None
 
             def getAsset(self, contract, customTicker=None):
                 _contract = w3.toChecksumAddress(contract)
@@ -150,7 +161,9 @@ class WalletBot(object):
                 self.web3.eth.send_raw_transaction(rawsigned)
                 txid = w3.keccak(rawsigned).hex()
                 return self.web3.eth.wait_for_transaction_receipt(txid)
-                
+               
+            def setDex(self, _dex):
+                self.DEX = _dex
                 
             def listAssets(self):
                 return ([self.nativeToken] + [value for key, value in self.tokens.items()])
@@ -170,6 +183,8 @@ class WalletBot(object):
             self.addRPC("https://bscrpc.com/", 56, "BNB", "BNB Chain", "https://bscscan.com", priceFeed=self.BSCPriceFeed())
             self.addRPC("https://polygon-rpc.com", 137, "MATIC", "Polygon", "https://polygonscan.com")
             
+            self.chains[56].setDex(self.DexRouter(self.chains[56].web3, "0x10ED43C718714eb63d5aA57B78B54704E256024E", 56))
+            
             self.assets["rptr"] = self.chains.get(0x52505452).getNativeAsset()
             self.assets["rduco"] = self.chains.get(0x52505452).getAsset("0x9ffE5c6EB6A8BFFF1a9a9DC07406629616c19d32")
             self.assets["bnb"] = self.chains.get(56).getNativeAsset()
@@ -182,8 +197,8 @@ class WalletBot(object):
             
             self.raptorBridgeBSC = self.chains[56].web3.eth.contract(address="0x44C99Ca267C2b2646cEEc72e898273085aB87ca5", abi=APPROVEANDCALLABI)
             
-        def addRPC(self, url, chainId, ticker, chainName, explorer, priceFeed=None, DEX=None):
-            self.chains[chainId] = self.RPC(url, chainId, ticker, chainName, explorer, priceFeed, DEX)
+        def addRPC(self, url, chainId, ticker, chainName, explorer, priceFeed=None):
+            self.chains[chainId] = self.RPC(url, chainId, ticker, chainName, explorer, priceFeed)
             
         def getAsset(self, assetName):
             return self.assets.get(assetName.lower())
@@ -212,12 +227,12 @@ class WalletBot(object):
             if (not _dex):
                 raise self.SwapError("Swaps are not yet implemented on this chain !")
             _sender = senderAccount.address
-            _rawAmount = amount * (10**_assetFrom.decimals)
+            _rawAmount = int(amount * (10**_assetFrom.decimals))
             if (_assetFrom.balanceOf(_sender) < amount):
                 raise self.SwapError("Insufficient balance !")
             if ((not _assetFrom.isNative) and (_assetFrom.allowance(_sender, _dex.router.address) < _rawAmount)):
                 self.submitTransaction(senderAccount, _assetFrom.approve(_sender, _dex.router.address, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff), _assetFrom.chainId)
-            return self.submitTransaction(senderAccount, _dex.swap(_sender, _assetFrom, _assetTo, _rawAmount), _assetFrom.chainId)
+            return self.submitTransaction(senderAccount, _dex.swap(_sender, _assetFrom, _assetTo, int(_rawAmount)), _assetFrom.chainId)
             
         def raptorBridgeDeposit(self, _asset, amount, senderAccount):
             if (_asset.chainId != 56):
