@@ -123,21 +123,18 @@ class WalletBot(object):
                     _spender = w3.toChecksumAddress(spender)
                     return self.contract.functions.approve(_spender, amount).buildTransaction({'nonce': self.web3.eth.get_transaction_count(_sender),'chainId': self.chainId, 'gasPrice': self.web3.eth.gasPrice, 'from': _sender})
 
+                def allowance(self, owner, spender):
+                    return self.contract.functions.allowance(owner, spender).call()
 
-            def __init__(self, provider, chainId, ticker, chainName, priceFeed, DEX):
+            def __init__(self, provider, chainId, ticker, chainName, explorer, priceFeed, DEX):
                 self.web3 = Web3(HTTPProvider(provider))
                 self.chainId = chainId
                 self.nativeToken = self.NativeAsset(self.web3, ticker, chainId, priceFeed)
                 self.tokens = {}
                 self.name = chainName
                 self.priceFeed = priceFeed
+                self.explorer = explorer
                 self.DEX = DEX
-
-            def submitTransaction(self, senderAccount, txSample):
-                signedtx = senderAccount.sign_transaction(txSample)
-                receipt = self.assets.chains[_asset.chainId].sendTransaction(signedtx)
-                print(receipt)
-                return receipt
 
             def getAsset(self, contract, customTicker=None):
                 _contract = w3.toChecksumAddress(contract)
@@ -154,16 +151,24 @@ class WalletBot(object):
                 txid = w3.keccak(rawsigned).hex()
                 return self.web3.eth.wait_for_transaction_receipt(txid)
                 
+                
             def listAssets(self):
                 return ([self.nativeToken] + [value for key, value in self.tokens.items()])
                 
+        class AssetNotFoundException(Exception):
+            pass
+            
+        class SwapError(Exception):
+            pass
+            
+            
         def __init__(self):
             self.chains = {}
             self.assets = {}
             
-            self.addRPC("http://localhost:4242/web3", 0x52505452, "RPTR", "RaptorChain", self.RaptorChainPriceFeed())
-            self.addRPC("https://bscrpc.com/", 56, "BNB", "BNB Chain", self.BSCPriceFeed())
-            self.addRPC("https://polygon-rpc.com", 137, "MATIC", "Polygon")
+            self.addRPC("http://localhost:4242/web3", 0x52505452, "RPTR", "RaptorChain", "https://explorer.raptorchain.io", priceFeed=self.RaptorChainPriceFeed())
+            self.addRPC("https://bscrpc.com/", 56, "BNB", "BNB Chain", "https://bscscan.com", priceFeed=self.BSCPriceFeed())
+            self.addRPC("https://polygon-rpc.com", 137, "MATIC", "Polygon", "https://polygonscan.com")
             
             self.assets["rptr"] = self.chains.get(0x52505452).getNativeAsset()
             self.assets["rduco"] = self.chains.get(0x52505452).getAsset("0x9ffE5c6EB6A8BFFF1a9a9DC07406629616c19d32")
@@ -175,11 +180,14 @@ class WalletBot(object):
             self.assets["mobl"] = self.chains.get(137).getAsset("0x5FeF39b578DeEefa4485A7E5944c7691677d5dd4")
             self.assets["maticduco"] = self.chains.get(137).getAsset("0xaf965beb8c830ae5dc8280d1c7215b8f0acc0cea")
             
-        def addRPC(self, url, chainId, ticker, chainName, priceFeed=None):
-            self.chains[chainId] = self.RPC(url, chainId, ticker, chainName, priceFeed)
+            self.raptorBridgeBSC = self.chains[56].web3.eth.contract(address="0x44C99Ca267C2b2646cEEc72e898273085aB87ca5", abi=APPROVEANDCALLABI)
+            
+        def addRPC(self, url, chainId, ticker, chainName, explorer, priceFeed=None, DEX=None):
+            self.chains[chainId] = self.RPC(url, chainId, ticker, chainName, explorer, priceFeed, DEX)
             
         def getAsset(self, assetName):
             return self.assets.get(assetName.lower())
+
 
         def formatAssetList(self):
             returnMsg = ""
@@ -189,6 +197,54 @@ class WalletBot(object):
                     returnMsg += f"{_asset.symbol}\n"
                 returnMsg += "\n"
             return returnMsg
+            
+        def submitTransaction(self, senderAccount, txSample, chainID):
+            signedtx = senderAccount.sign_transaction(txSample)
+            receipt = self.chains[chainID].sendTransaction(signedtx)
+            print(receipt)
+            return receipt
+
+            
+        def swapUsingDex(self, _assetFrom, _assetTo, senderAccount, amount):
+            if (_assetFrom.chainId != _assetTo.chainId):
+                raise self.SwapError("Cannot find a direct route between 2 different chains !")
+            _dex = self.chains.get(_assetFrom.chainId).DEX
+            if (not _dex):
+                raise self.SwapError("Swaps are not yet implemented on this chain !")
+            _sender = senderAccount.address
+            _rawAmount = amount * (10**_assetFrom.decimals)
+            if (_assetFrom.balanceOf(_sender) < amount):
+                raise self.SwapError("Insufficient balance !")
+            if ((not _assetFrom.isNative) and (_assetFrom.allowance(_sender, _dex.router.address) < _rawAmount)):
+                self.submitTransaction(senderAccount, _assetFrom.approve(_sender, _dex.router.address, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff), _assetFrom.chainId)
+            return self.submitTransaction(senderAccount, _dex.swap(_sender, _assetFrom, _assetTo, _rawAmount), _assetFrom.chainId)
+            
+        def raptorBridgeDeposit(self, _asset, amount, senderAccount):
+            if (_asset.chainId != 56):
+                raise Exception("Invalid chainID")
+            _rawAmount = int(amount * int(10**_asset.decimals))
+            return self.submitTransaction(senderAccount, self.raptorBridgeBSC.functions.approveAndCall("0x6a200e1aA7D31F17211CD569C788Ac1d3Ab1B9f9", _rawAmount, b"").buildTransaction({'nonce': self.chains[56].web3.eth.get_transaction_count(senderAccount.address),'chainId': 56, 'gasPrice': self.chains[56].web3.eth.gasPrice, 'from': senderAccount.address}), 56)
+            
+        def swap(self, assetFrom, assetTo, senderAccount, amount):
+            _assetFrom = self.getAsset(assetFrom)
+            _assetTo = self.getAsset(assetTo)
+            if (not _assetFrom):
+                raise self.AssetNotFoundException(f"Unknown asset {assetFrom}")
+            if (not _assetTo):
+                raise self.AssetNotFoundException(f"Unknown asset {assetTo}")
+            if (assetFrom.lower() == assetTo.lower()):
+                raise self.SwapError("Asset cannot be swapped for itself !")
+                
+            # Use of RaptorBridge
+            if (assetFrom.lower() == "rptr" and assetTo.lower() == "bscrptr"):
+                return (_assetFrom.chainId, self.submitTransaction(senderAccount, _assetFrom.transfer(senderAccount.address, "0x0000000000000000000000000000000000000097", amount), _assetFrom.chainId))
+            elif (assetFrom.lower() == "bscrptr" and assetTo.lower() == "rptr"):
+                return (56, self.raptorBridgeDeposit(_assetFrom, amount, senderAccount))
+            
+            # Normal DEX trade
+            else:
+                return (_assetFrom.chainId, self.swapUsingDex(_assetFrom, _assetTo, senderAccount, amount))
+                
             
         def formatBalanceList(self, addr):
             returnMsg = ""
@@ -217,6 +273,7 @@ class WalletBot(object):
         self.updater.dispatcher.add_handler(CommandHandler('balance', self.balance))
         self.updater.dispatcher.add_handler(CommandHandler('balances', self.balances))
         self.updater.dispatcher.add_handler(CommandHandler('transfer', self.transfer))
+        self.updater.dispatcher.add_handler(CommandHandler('swap', self.swap))
         self.updater.dispatcher.add_handler(CommandHandler('assets', self.getAssetList))
         self.updater.dispatcher.add_handler(CommandHandler('price', self.priceOf))
         self.updater.dispatcher.add_handler(CommandHandler('help', self.helpMessage))
@@ -293,6 +350,21 @@ class WalletBot(object):
                 update.message.reply_text(f"Transfer succeeded !\nTxid : {receipt['transactionHash'].hex()}")
         except Exception as e:
             update.message.reply_text(f"The following exception was encountered while processing your transfer\n{e.__repr__()}")
+        
+    def swap(self, update: Update, context: CallbackContext):
+        try:
+            tokens = float(context.args[0])
+            assetFrom = context.args[1]
+            assetTo = context.args[2]
+            (chainid, receipt) = self.assets.swap(assetFrom, assetTo, self.acctMgr.getAccount(update.effective_user.id), tokens)
+            if (receipt.get("status") == 0):
+                update.message.reply_text(f"Swap failed...")
+            else:
+                update.message.reply_text(f"Swap succeeded !\nTxid : {receipt['transactionHash'].hex()}\n{self.assets.chains[chainid].explorer}/tx/{receipt['transactionHash'].hex()}")
+        except self.assets.SwapError as e:
+            update.message.reply_text(str(e))
+        except Exception as e:
+            update.message.reply_text(f"The following exception was encountered while processing your swap\n{e.__repr__()}")
         
 walletBot = WalletBot()
 walletBot.startBot()
