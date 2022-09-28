@@ -363,6 +363,8 @@ class WalletBot(object):
                 update.message.reply_text(f"Swap succeeded !\nTxid : {receipt['transactionHash'].hex()}\n{self.assets.chains[chainid].explorer}/tx/{receipt['transactionHash'].hex()}")
         except self.assets.SwapError as e:
             update.message.reply_text(str(e))
+        except self.assets.AssetNotFoundException as e:
+            update.message.reply_text(str(e))
         except Exception as e:
             update.message.reply_text(f"The following exception was encountered while processing your swap\n{e.__repr__()}")
         
