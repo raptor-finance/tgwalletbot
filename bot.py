@@ -321,7 +321,7 @@ class WalletBot(object):
         update.message.reply_text(f"1 {asset.symbol} = {asset.price()}$")
         
     def helpMessage(self, update: Update, context: CallbackContext):
-        update.message.reply_text("""Here's the list of commands for this bot !\n\n/address - get your address\n/balance <asset> - get your balance of an asset\n/balances - list your balances\n/transfer <amount> <asset> <recipient> - transfer tokens\n/price <asset> - show price of an asset\n/help - show this help message\nswap <amount> <sourceA> <tokenB> - swap a token A to a token B (if supported)""")
+        update.message.reply_text("""Here's the list of commands for this bot !\n\n/address - get your address\n/balance <asset> - get your balance of an asset\n/balances - list your balances\n/transfer <amount> <asset> <recipient> - transfer tokens\n/price <asset> - show price of an asset\n/help - show this help message\n/swap <amount> <sourceA> <tokenB> - swap a token A to a token B (if supported)""")
         
     ### Commands that read user account
     def getAddress(self, update: Update):
