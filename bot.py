@@ -48,7 +48,7 @@ class WalletBot(object):
             def tokenPrice(self, tokenAddr, decimals):
                 return float(0)
 
-        class DexRouter(object):
+        class UniswapLikeDex(object):
             def __init__(self, web3Instance, router, chainId):
                 self.web3 = web3Instance
                 self.router = web3Instance.eth.contract(address=w3.toChecksumAddress(router), abi=ROUTERABI)
@@ -183,7 +183,7 @@ class WalletBot(object):
             self.addRPC("https://bscrpc.com/", 56, "BNB", "BNB Chain", "https://bscscan.com", priceFeed=self.BSCPriceFeed())
             self.addRPC("https://polygon-rpc.com", 137, "MATIC", "Polygon", "https://polygonscan.com")
             
-            self.chains[56].setDex(self.DexRouter(self.chains[56].web3, "0x10ED43C718714eb63d5aA57B78B54704E256024E", 56))
+            self.chains[56].setDex(self.UniswapLikeDex(self.chains[56].web3, "0x10ED43C718714eb63d5aA57B78B54704E256024E", 56))
             
             self.assets["rptr"] = self.chains.get(0x52505452).getNativeAsset()
             self.assets["rduco"] = self.chains.get(0x52505452).getAsset("0x9ffE5c6EB6A8BFFF1a9a9DC07406629616c19d32")
