@@ -49,8 +49,9 @@ class WalletBot(object):
                 return float(0)
 
         class UniswapLikeDex(object):
-            def __init__(self, web3Instance, router, chainId):
+            def __init__(self, web3Instance, router, chainId, gas=None):
                 self.web3 = web3Instance
+                self.gas = gas
                 self.router = web3Instance.eth.contract(address=w3.toChecksumAddress(router), abi=ROUTERABI)
                 self.WETH = web3Instance.eth.contract(address=self.router.functions.WETH().call(), abi=ERC20ABI)
                 self.chainId = chainId
@@ -74,13 +75,18 @@ class WalletBot(object):
                 _min = self.calcSlippage(tokenAmount, _path)
                 return self.router.functions.swapExactTokensForETH(tokenAmount, _min, _path, _sender, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff).buildTransaction({'nonce': self.web3.eth.get_transaction_count(_sender),'chainId': self.chainId, 'gasPrice': self.web3.eth.gasPrice, 'from': _sender})
 
+            def applyGas(self, _tx):
+                if self.gas:
+                    _tx["gas"] = self.gas
+                return _tx
+
             def swap(self, _sender, assetFrom, assetTo, rawAmount: int):
                 if ((assetFrom.isNative) and (not assetTo.isNative)):
-                    return self.swapETHForTokens(rawAmount, assetTo.address, _sender)
+                    return self.applyGas(self.swapETHForTokens(rawAmount, assetTo.address, _sender))
                 if ((not assetFrom.isNative) and (assetTo.isNative)):
-                    return self.swapTokensForETH(assetFrom.address, rawAmount, _sender)
+                    return self.applyGas(self.swapTokensForETH(assetFrom.address, rawAmount, _sender))
                 if ((not assetFrom.isNative) and (not assetTo.isNative)):
-                    return self.swapTokensForTokens(assetFrom.address, assetTo.address, rawAmount, _sender)
+                    return self.applyGas(self.swapTokensForTokens(assetFrom.address, assetTo.address, rawAmount, _sender))
 
     
         class RPC(object):
@@ -184,6 +190,7 @@ class WalletBot(object):
             self.addRPC("https://polygon-rpc.com", 137, "MATIC", "Polygon", "https://polygonscan.com")
             
             self.chains[56].setDex(self.UniswapLikeDex(self.chains[56].web3, "0x10ED43C718714eb63d5aA57B78B54704E256024E", 56))
+            self.chains[0x52505452].setDex(self.UniswapLikeDex(self.chains[0x52505452].web3, "0x397D194abF71094247057642003EaCd463b7931f", 0x52505452, 500000))
             
             self.assets["rptr"] = self.chains.get(0x52505452).getNativeAsset()
             self.assets["rduco"] = self.chains.get(0x52505452).getAsset("0x9ffE5c6EB6A8BFFF1a9a9DC07406629616c19d32")
@@ -355,14 +362,15 @@ class WalletBot(object):
             tokens = float(context.args[0])
             assetName = context.args[1]
             recipient = context.args[2]
-            if not self.assets.getAsset(assetName):
+            _asset = self.assets.getAsset(assetName)
+            if not _asset:
                 update.message.reply_text(f"Error: unknown asset {assetName}")
                 return
             receipt = self.transferAsset(assetName, self.acctMgr.getAccount(update.effective_user.id), recipient, tokens)
             if (receipt.get("status") == 0):
                 update.message.reply_text(f"Transfer failed...")
             else:
-                update.message.reply_text(f"Transfer succeeded !\nTxid : {receipt['transactionHash'].hex()}")
+                update.message.reply_text(f"Transfer succeeded !\nTxid : {receipt['transactionHash'].hex()}\n{self.assets.chains[_asset.chainId].explorer}/tx/{receipt['transactionHash'].hex()}")
         except Exception as e:
             update.message.reply_text(f"The following exception was encountered while processing your transfer\n{e.__repr__()}")
         
@@ -382,6 +390,7 @@ class WalletBot(object):
             update.message.reply_text(str(e))
         except Exception as e:
             update.message.reply_text(f"The following exception was encountered while processing your swap\n{e.__repr__()}")
+            raise
         
 walletBot = WalletBot()
 walletBot.startBot()
